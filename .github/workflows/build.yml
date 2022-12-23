@@ -11,126 +11,30 @@ on:
   release:
     types: [ published ]
 
-defaults:
-  run:
-    shell: bash
-
 jobs:
-  build_wheels_windows:
-    name: Build wheels on Windows
-    runs-on: windows-latest
-    strategy:
-      fail-fast: False
-      matrix:
-        python-version: [ 3.7, 3.8, 3.9, '3.10', '3.11' ]
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v2
-        with:
-          submodules: true
-
-      - name: Setup Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v2
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install SWIG
-        run: choco install swig -y
-
-      - name: Build wheels
-        run: |
-          python -m pip install -U pip numpy wheel
-          python setup.py bdist_wheel -d dist
-
-      - name: Place wheels in artifacts folder
-        uses: actions/upload-artifact@v2
-        with:
-          path: ./dist/*.whl
-
-  build_wheels_unix:
+  build_wheels:
     name: Build wheels on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: False
       matrix:
-        os: [ ubuntu-latest, macos-latest ]
+        os: [ubuntu-20.04, windows-2019, macos-11]
+
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v2
+      - uses: actions/checkout@v3
         with:
           submodules: true
-
-      - name: Setup Python 3.9
-        uses: actions/setup-python@v2
-        with:
-          python-version: 3.9
 
       - name: Build wheels
+        uses: pypa/cibuildwheel@v2.11.3
         env:
-          # only build CPython-3.6 and later and skip 32-bit builds and skip windows
+          CIBW_BEFORE_BUILD_WINDOWS: choco install swig -y
+          CIBW_BEFORE_BUILD_LINUX: yum install swig -y
+          CIBW_BEFORE_BUILD_MACOS: brew install swig
           CIBW_BUILD: cp37-* cp38-* cp39-* cp310-* cp311-*
-          CIBW_SKIP: "*-win* *-manylinux_i686 *-musllinux*"
-          # use latest build
-          CIBW_MANYLINUX_X86_64_IMAGE: danielbok/nlopt_manylinux2014_x86_64:latest
-          CIBW_BEFORE_ALL_MACOS: brew install swig
-          CIBW_BEFORE_BUILD: pip install numpy
-        run: |
-          pip install -U pip cibuildwheel
-          python -m cibuildwheel --output-dir dist
-          ls -R dist
+          CIBW_SKIP: *-manylinux_i686 *-musllinux*
+          CIBW_TEST_COMMAND: python extern/nlopt/test/t_python.py
 
-      - name: Place wheels in artifacts folder
-        uses: actions/upload-artifact@v2
-        with:
-          path: ./dist/*.whl
 
-  test-wheels:
-    name: Test wheels
-    needs: [ build_wheels_windows, build_wheels_unix ]
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ windows-latest, ubuntu-latest, macos-latest ]
-        python-version: [ 3.7, 3.8, 3.9, '3.10', '3.11' ]
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v2
-        with:
-          submodules: true
-      - name: Setup Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v2
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Retrieve packages
-        uses: actions/download-artifact@v2
-        with:
-          path: dist
-
-      - name: Test Package Installation
-        run: |
-          python -m pip install --upgrade pip
-
-          # list all files in the dist folder
-          ls -R dist
-
-          # finds path to the right wheel or source file to install later
-          os=$(echo ${{ runner.os }} | awk '{print tolower($0)}' | head -c3)
-
-          # version refers to the python version. So 3.8 -> 38
-          version=$(echo ${{ matrix.python-version }} | sed 's/\.//g')
-
-          # this finds files like
-          # nlopt-2.6.2-cp36-cp36m-win_amd64.whl
-          # nlopt-2.6.2-cp36-cp36m-manylinux10_amd64.whl
-          # nlopt-2.7.1-cp310-cp310-win_amd64.whl
-          file=$(find dist -name "nlopt-*${version}*${os}*.whl" -type f);
-
-          echo "Installing file: ${file}"
-
-          pip install ${file}
-          python extern/nlopt/test/t_python.py
 
   deploy:
     name: deploy packages
